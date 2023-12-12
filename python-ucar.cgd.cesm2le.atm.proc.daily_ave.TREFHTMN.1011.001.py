@@ -78,43 +78,23 @@ data = [
      {'url':'https://tds.ucar.edu/thredds/fileServer/datazone/campaign/cgd/cesm/CESM2-LE/atm/proc/tseries/day_1/TREFHTMN/b.e21.BSSP370smbb.f09_g17.LE2-1011.001.cam.h1.TREFHTMN.20950101-21001231.nc','filename':'b.e21.BSSP370smbb.f09_g17.LE2-1011.001.cam.h1.TREFHTMN.20950101-21001231.nc','bytes':'278067279'},]
 
 def main(args, data):
-
     for download in createDownloads(args, data):
-
-        if isCompleteDownload(download):
-            completeDownload(download)
-        elif isPartialDownload(download):
+        if download.isComplete():
+            print(f'complete: {download.filename}')
+        elif download.isPartial():
             resumeDownload(download)
         else:
             startDownload(download)
 
 def createDownloads(args, data):
-
-    downloads = []
-
-    for d in data:
-        download = Download(d)
-        download.setApiToken(args.get('apiToken'))
-        download.setUserAgent(args.get('userAgent'))
-        downloads.append(download)
-
+    userToken = args.get('apiToken')
+    userAgent = args.get('userAgent')
+    downloads = [Download(d, userToken, userAgent) for d in data]
     return downloads
-
-def isCompleteDownload(download):
-
-    return os.path.isfile(download.getFilename())
-
-def isPartialDownload(download):
-
-    return os.path.isfile(download.getPart())
-
-def completeDownload(download):
-
-    print('complete:', download.getFilename())
 
 def resumeDownload(download):
 
-    print('resuming:', download.getFilename())
+    print('resuming:', download.filename)
 
     headers = createHeaders(download)
     headers.append(createRangeHeader(download))
@@ -126,7 +106,7 @@ def resumeDownload(download):
 
 def startDownload(download):
 
-    print('downloading:', download.getFilename())
+    print('downloading:', download.filename)
 
     headers = createHeaders(download)
 
@@ -139,10 +119,10 @@ def createHeaders(download):
 
     headers = []
 
-    headers.append(('User-agent', download.getUserAgent()))
+    headers.append(('User-agent', download.userAgent))
 
-    if download.getApiToken():
-        headers.append(('Authorization', 'api-token {}'.format(download.getApiToken())))
+    if download.apiToken is not None:
+        headers.append(('Authorization', 'api-token {}'.format(download.apiToken)))
 
     return headers
 
@@ -158,71 +138,44 @@ def tryDownloadFile(download, opener):
     try:
         downloadFile(download, opener)
     except HTTPError as error:
-        print('Download of {} failed! Reason: code {}, {}'.format(download.getFilename(), error.status, error.reason))
+        print('Download of {} failed! Reason: code {}, {}'.format(download.filename, error.status, error.reason))
     except URLError as error:
-        print('Download of {} failed! Reason: {}'.format(download.getFilename(), error.reason))
+        print('Download of {} failed! Reason: {}'.format(download.filename, error.reason))
     except TimeoutError:
-        print('Download of {} failed! Reason: request timed out'.format(download.getFilename()))
+        print('Download of {} failed! Reason: request timed out'.format(download.filename))
 
 def downloadFile(download, opener):
 
-    with opener.open(download.getUrl()) as response, open(download.getPart(), 'ab') as fh:
+    with opener.open(download.url) as response, open(download.part, 'ab') as fh:
         shutil.copyfileobj(response, fh)
 
-    os.rename(download.getPart(), download.getFilename())
+    os.rename(download.part, download.filename)
 
-    print('complete:', download.getFilename())
+    print('complete:', download.filename)
 
 class Download():
 
-    def __init__(self, datum):
-
+    def __init__(self, datum, token=None, agent=None):
         self.url = datum.get('url')
         self.filename = datum.get('filename')
-        self.bytes = datum.get('bytes')
+        self.bytes = int(datum.get('bytes'))
         self.part = self.filename + '.part'
-        self.apiToken = None
-        self.userAgent = 'python'
+        self.apiToken = token
+        self.userAgent = 'python' if agent is None else agent
 
-    def getUrl(self):
+    def isComplete(self):
+        '''Checks if the file exists and matches the expected bytes in the data manifest'''
+        return (
+            os.path.isfile(self.filename) and
+            os.stat(self.filename).st_size == self.bytes
+        )
 
-        return self.url
-
-    def getFilename(self):
-
-        return self.filename
-
-    def getBytes(self):
-
-        return self.bytes
-
-    def getPart(self):
-
-        return self.part
-
-    def setApiToken(self, apiToken):
-
-        self.apiToken = apiToken
-
-    def getApiToken(self):
-
-        return self.apiToken
-
-    def setUserAgent(self, userAgent):
-
-        self.userAgent = userAgent
-
-    def getUserAgent(self):
-
-        return self.userAgent
+    def isPartial(self):
+        '''This doesn't really cover the edge-case where self.filename and self.part can both exist'''
+        return os.path.isfile(self.part)
 
     def __str__(self):
+        return f'url: {self.url}, filename: {self.filename}, bytes: {self.bytes}'
 
-        return ', '.join([
-            'url: ' + self.url,
-            'filename: ' + self.filename,
-            'bytes: ' + str(self.bytes),
-        ])
-
-main(args, data)
-
+if __name__ == '__main__':
+    main(args, data)
